@@ -7,19 +7,19 @@ options(java.parameters = "-Xmx48g",scipen=999)
 #the rstudioapi package. It offers the rstudio::getActiveDocumentContext() that
 #allows relative paths.
 
-vec.pkg <- c('MASS',"rstudioapi","lubridate","tidyverse","tictoc",'readxl')
+vec.pkg <- c("yuima","latex2exp",'MASS','astsa','forecast','gridExtra',"rstudioapi","lubridate","tictoc",
+             'tidyquant','readxl',"tidyverse")
 vec.newpkg <- vec.pkg[!(vec.pkg %in% installed.packages()[,"Package"])]
 if(length(vec.newpkg)) install.packages(vec.newpkg)
 lapply(vec.pkg, require, character.only = TRUE)
 rm(vec.pkg,vec.newpkg)
- 
+
 #Sets the current folder of the script as the working directory.
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
-
-
 ZZZ_VLookUp_Holidays <- readxl::read_excel('Other_Data/PSD_Holidays.xlsx') %>%
   mutate(Date = ymd(Date))
+
 
 #### Boundaries (structural (hourly) maximum, maximum and minimum for the PSD). ####
 ZZZ_bound <- data.frame(Year = c(2018:2020),
@@ -78,15 +78,6 @@ if(ZZZ_Hourly_PSD %>% group_by(Date,Hour_Hourly,SubMkt) %>% filter(n()!=1) %>% n
   print('Number of rows different from expected quantity of hours!')
 }else{} 
 
-# Commented piece: calculates time interval between two dates.
-# T_length <- time_length(
-#   interval(
-#     min(ZZZ_Hourly_PSD$Date),
-#     max(ZZZ_Hourly_PSD$Date)
-#   ),"day")
-
-# Commented piece: equally lengthed partition; time-vector.
-# vec.tempo.teste <- lubridate::ymd(min(ZZZ_Hourly_PSD$Date)) %m+% days(0:763)
 
 # After the proper data cleaning of the Weekly and Hourly PSD's, 
 # the argument of fnc.VLookUp_Weekly_vs_Hourly(df_Days_PSDh) is settled.
@@ -115,16 +106,6 @@ ZZZ_LoadSteps <- bind_rows(... =
   #Strictly necessary: there is an unexplicable behavior under 'America/Sao_Paulo' time zone.
   mutate(Key = as.POSIXct(strptime(paste0(Date,' ',Hour_LoadStep),"%Y-%m-%d %H:%M"),tz = "America/Buenos_Aires"))
 
-# Test to verify which month is lacking days on a Hourly PSD basis.
-# View(
-#   ZZZ_Hourly_PSD %>% select(Date) %>% 
-#     mutate(`Year/Month` = paste0(str_sub(Date,1,4),'/',str_sub(Date,6,7))) %>% distinct() %>% 
-#     mutate(fnc_Days = days_in_month(Date)) %>% 
-#     group_by(fnc_Days,`Year/Month`) %>% mutate(Days_in_Month = n()) %>%
-#     ungroup() %>% filter(Days_in_Month != fnc_Days)
-#   )
-#       
-
 source('Sub/function_dataframe_PSD.R')
 
 dataframe_PSD <- fnc.dataframe_PSD(
@@ -134,36 +115,34 @@ dataframe_PSD <- fnc.dataframe_PSD(
   ZZZ_VLookUp_Holidays=ZZZ_VLookUp_Holidays
   )
 
-writexl::write_xlsx(x = dataframe_PSD,'../Stochastic_Processes_PSD_Output/dataframe_PSD.xlsx')
+# Time between intervals: true number of days.
+T_length <- time_length(
+  interval(
+    min(ZZZ_Hourly_PSD$Date),
+    max(ZZZ_Hourly_PSD$Date)
+  ),"day")
 
+# Dataframe of running days.
+df_days <- data.frame(Days = lubridate::ymd(min(dataframe_PSD$Date)) %m+% days(0:T_length)) %>%
+  full_join(dataframe_PSD %>% distinct(Date) %>% mutate(Alias = Date), by=c('Days'='Date'))
 
-df_SE_PSD <- dataframe_PSD %>% filter(SubMkt == 'SE')
+# Table with missing days.
+# jpeg("Figures_MD/ZZZ_MissingDays.jpeg")
+# grid.table(
+#   df_days %>% filter(is.na(Alias)) %>%
+#     rename(`Dia Faltante` = Days) %>%
+#     mutate(`Dia da Semana` = wday(`Dia Faltante`,label = T)) %>%
+#     select(`Dia Faltante`,`Dia da Semana`)
+# )
+# dev.off()
 
-df_SE_PSD %>% ggplot(data=.,aes(x = log_diff,fill=LoadStep)) + 
-  geom_histogram(aes(y=..density..)) +
-#  geom_histogram(aes(y=(..count..)*100/(sum(..count..)))) + 
-  facet_grid(rows=vars(Type_LoadStep),cols=vars(LoadStep,DayLightType))
+if(!dir.exists(paste0("../Stochastic_Processes_PSD_Output/"))){
+  dir.create(paste0("../Stochastic_Processes_PSD_Output/"))
+}else{}
 
+# Save tidy dataset in a Excel file.
+writexl::write_xlsx(x = list(dataframe_PSD = dataframe_PSD),
+                    '../Stochastic_Processes_PSD_Output/dataframe_PSD.xlsx')
 
-hist(df_SE_PSD$diff_nom)
-hist(df_SE_PSD$diff_perc[df_SE_PSD$LoadStep=='Leve'])
-hist(df_SE_PSD$diff_perc[df_SE_PSD$LoadStep=='Médio'])
-hist(df_SE_PSD$diff_perc[df_SE_PSD$LoadStep=='Pesado'])
-
-x <- fitdistr(x = exp(df_SE_PSD$log_diff[df_SE_PSD$LoadStep=='Leve']),densfun = 'gamma')
-
-h <- hist((df_SE_PSD$log_diff[df_SE_PSD$LoadStep=='Leve']), freq = F, plot = T)
-bins_ret <- h$mids
-?dlnorm
-fit_N <- dlnorm(bins_ret,shape = x$estimate[1],scale = x$estimate[2])
-hist((df_SE_PSD$log_diff[df_SE_PSD$LoadStep=='Leve']), freq = F, plot = T)
-lines(x = bins_ret, y = fit_N, col = "green", lty = 2, lwd = 2)
-fit_N
-fit_N <- dweibull(bins_ret,shape = x$estimate[1],scale = x$estimate[2])
-
-?fitdistr
-exp(.25)
-
-log(52/50)
-(52/50)-1
-exp(log(52/50))
+#Save tidy dataset as rds.
+write_rds(x = dataframe_PSD, '../Stochastic_Processes_PSD_Output/dataframe_PSD.rds')
